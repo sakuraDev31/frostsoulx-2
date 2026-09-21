@@ -1,0 +1,17 @@
+<!--
+    Add these preferences to your existing lyrics or player settings XML.
+    Example: res/xml/preferences_lyrics.xml or wherever your settings are defined.
+-->
+
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Existing preferences... -->
+
+    <SwitchPreferenceCompat
+        android:key="notification_lyrics_enabled"
+        android:title="Notification Lyrics"
+        android:summary="Show time-synced lyrics in the notification shade"
+        android:defaultValue="true"
+        />
+
+</PreferenceScreen>

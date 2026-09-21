@@ -1,0 +1,870 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
+package dev.vxs.frostsoulx.ui.player.frostsoul
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import dev.vxs.frostsoulx.ui.component.playerArtwork
+import coil3.compose.AsyncImage
+import dev.vxs.frostsoulx.R
+import dev.vxs.frostsoulx.ui.frostsoul.FSIcon
+import dev.vxs.frostsoulx.ui.frostsoul.FrostSoulTheme
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
+import kotlinx.coroutines.isActive
+
+/** Park outward, clear of the record rim, without crossing the enlarged artwork label. */
+private const val TonearmParkedDegrees = -12f
+
+@Composable
+internal fun FSGlassCard(
+    modifier: Modifier = Modifier,
+    accent: Color = Color.White,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        modifier =
+            modifier
+                .clip(shape)
+                .background(FrostSoulSurface.copy(alpha = 0.98f))
+                .border(
+                    width = 1.dp,
+                    color = accent.copy(alpha = 0.16f),
+                    shape = shape,
+                ),
+        content = content,
+    )
+}
+
+@Composable
+internal fun FSIconButton(
+    painter: Painter,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    compact: Boolean = false,
+    buttonSize: Dp = if (compact) 42.dp else 50.dp,
+    iconSize: Dp = if (compact) 20.dp else 23.dp,
+    showContainer: Boolean = true,
+    forceWhite: Boolean = false,
+    dimBackdrop: Boolean = true,
+    tintOverride: Color? = null,
+) {
+    val isLightTheme = FrostSoulTheme.colors.background.luminance() > 0.5f
+    // Containerless icons (showContainer = false) sit directly on the artwork / ambient-blur
+    // backdrop, which stays dark-ish regardless of the app's light/dark theme setting. Only
+    // let the theme flip the tint to a dark color when there is an actual background chip
+    // behind the icon (showContainer = true) that also flips color for contrast — otherwise
+    // always keep it near-white so it never disappears in light theme. See FS-BUG-LIGHTMODE.
+    val baseTint =
+        if (isLightTheme && showContainer) FrostSoulTheme.colors.onSurface else Color.White
+    val iconTint =
+        tintOverride ?: if (forceWhite) {
+            Color.White
+        } else {
+            when {
+                !enabled -> baseTint.copy(alpha = 0.28f)
+                active -> FrostSoulTheme.colors.accentBright
+                else -> baseTint
+            }
+        }
+    val background =
+        if (active) {
+            baseTint.copy(alpha = if (isLightTheme && showContainer) 0.10f else 0.14f)
+        } else {
+            if (isLightTheme && showContainer) FrostSoulTheme.colors.surfaceRaised else Color.White.copy(alpha = 0.08f)
+        }
+    val buttonModifier = modifier.size(buttonSize)
+    val styledModifier =
+        if (forceWhite) {
+            buttonModifier
+        } else if (showContainer) {
+            buttonModifier
+                .clip(CircleShape)
+                .background(background)
+                .border(1.dp, iconTint.copy(alpha = if (active) 0.52f else 0.15f), CircleShape)
+        } else if (dimBackdrop) {
+            // No chip behind the icon, so give it a faint dark scrim disc instead — enough to
+            // guarantee contrast over bright artwork or a light-themed backdrop without
+            // looking like a full button, matching the reference UI's soft icon shadowing.
+            buttonModifier
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = if (active) 0.0f else 0.16f))
+        } else {
+            buttonModifier
+        }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier =
+            styledModifier
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                ).semantics { this.contentDescription = contentDescription },
+    ) {
+        FSIcon(
+            painter = painter,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+@Composable
+internal fun FSAlbumArt(
+    artworkUrl: String?,
+    title: String,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    palette: FrostSoulPalette = FrostSoulPalette.Default,
+) {
+    // A cancellable Animatable is essential here. An infinite transition keeps advancing while
+    // paused, so snapshotting its value on pause makes resume jump to a later angle. Cancelling
+    // this animation preserves the exact in-flight value; the next play starts from that value.
+    val rotation = remember(artworkUrl) { Animatable(0f) }
+    LaunchedEffect(artworkUrl, isPlaying) {
+        if (isPlaying) {
+            while (isActive) {
+                rotation.animateTo(
+                    targetValue = rotation.value + 360f,
+                    animationSpec = tween(durationMillis = 26_000, easing = LinearEasing),
+                )
+            }
+        }
+    }
+    // Playing → the stylus tracks a groove in the record's outer band (angle 0 = the resting
+    // geometry authored below). Off → the arm swings OUTWARD to the right and parks on its
+    // rest post, clear of the record, exactly like the reference deck.
+    //
+    // Canvas rotate() is clockwise-positive, and the authored arm already points down-left
+    // (~7 o'clock) from its top-right pivot, so clockwise would drag it further LEFT across
+    // the label. Parking therefore needs a NEGATIVE (counter-clockwise) angle — this is the
+    // bug that used to swing the arm the wrong way and drop the stylus onto the artwork.
+    val tonearmAngle by animateFloatAsState(
+        targetValue = if (isPlaying) 0f else TonearmParkedDegrees,
+        animationSpec = tween(durationMillis = 560),
+        label = "fs-tonearm-angle",
+    )
+
+    if (compact) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = modifier.aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(FrostSoulSurfaceElevated),
+        ) {
+            AsyncImage(
+                model = artworkUrl,
+                contentDescription = "Album artwork for $title",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (artworkUrl.isNullOrBlank()) {
+                FSIcon(
+                    painter = painterResource(R.drawable.music_note),
+                    contentDescription = null,
+                    tint = FrostSoulOnSurfaceMuted,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
+        return
+    }
+
+    val cardShape = RoundedCornerShape(26.dp)
+    val cardSize = PlayerLayoutTokens.TurntableCardSize.value
+    val platterFraction = PlayerLayoutTokens.TurntablePlatterSize.value / cardSize
+    val labelFraction = PlayerLayoutTokens.TurntableLabelSize.value / cardSize
+    val labelArtFraction = PlayerLayoutTokens.TurntableLabelArtSize.value / cardSize
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .aspectRatio(1f)
+            .shadow(elevation = 26.dp, shape = cardShape, clip = false)
+            .clip(cardShape)
+            .background(
+                // Deck plate: lifted off pure black so the whole card reads as a distinct panel
+                // sitting on the page instead of melting into it. The page background behind it
+                // is itself near-black, so contrast has to come from the card's own floor tone
+                // and a crisper border rather than from the page ever going lighter.
+                Brush.linearGradient(
+                    colors = listOf(Color(0xFF23252A), Color(0xFF17191D), Color(0xFF111216)),
+                ),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.10f), cardShape),
+    ) {
+        // Matte neutral deck, as in the reference; atmosphere belongs behind the player,
+        // not in a second full-size blurred artwork layer inside the turntable.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.28f)),
+                    center = center,
+                    radius = size.minDimension * 0.72f,
+                ),
+            )
+        }
+
+        // A soft platter well separates the record from the deck without adding another hard ring.
+        // A faint hint of the album's secondary color is mixed in so the well reads as part of
+        // the same tinted-plastic material as the disc, not a neutral grey gutter around it.
+        Box(
+            modifier = Modifier
+                .fillMaxSize(platterFraction + 0.035f)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            lerp(Color(0xFF0D0E12), palette.artworkSecondary, 0.08f),
+                            Color(0xFF3A3D44),
+                            Color(0xFF101115),
+                        ),
+                    ),
+                ),
+        )
+
+        // Spinning record: sized relative to the deck so it never overflows the card.
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize(platterFraction)
+                .graphicsLayer { rotationZ = rotation.value },
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val platterRadius = size.minDimension / 2f
+                val labelRadius = platterRadius *
+                    (PlayerLayoutTokens.TurntableLabelSize.value / PlayerLayoutTokens.TurntablePlatterSize.value)
+
+                // Smoked, artwork-tinted vinyl; keep the groove floor visible on OLED black.
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.00f to lerp(Color(0xFF202631), palette.artworkPrimary, 0.28f),
+                            0.36f to lerp(Color(0xFF18202D), palette.artworkSecondary, 0.32f),
+                            0.74f to lerp(Color(0xFF202735), palette.artworkPrimary, 0.24f),
+                            0.96f to lerp(Color(0xFF303642), palette.artworkSecondary, 0.20f),
+                            1.00f to Color(0xFF111319),
+                        ),
+                        center = center,
+                        radius = platterRadius,
+                    ),
+                    radius = platterRadius,
+                    center = center,
+                )
+
+                // A soft moving sheen across the groove annulus; lower contrast by design.
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        0.00f to Color.Transparent,
+                        0.16f to Color.White.copy(alpha = 0.06f),
+                        0.30f to Color.Transparent,
+                        0.62f to Color.Transparent,
+                        0.78f to Color.White.copy(alpha = 0.035f),
+                        1.00f to Color.Transparent,
+                        center = center,
+                    ),
+                    radius = platterRadius * 0.86f,
+                    center = center,
+                    style = Stroke(width = platterRadius * 0.16f),
+                )
+
+                // Fine pressed grooves with dark valleys under the fixed room reflection.
+                val grooveInner = labelRadius + 3.dp.toPx()
+                val grooveOuter = platterRadius * 0.968f
+                val grooveCount = 52
+                for (index in 0 until grooveCount) {
+                    val t = index / (grooveCount - 1f)
+                    val eased = t // Even spacing avoids dense, aliasing rings at the outer rim.
+                    val ringRadius = grooveInner + (grooveOuter - grooveInner) * eased
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.075f + 0.065f * (1f - t)),
+                        radius = ringRadius,
+                        center = center,
+                        style = Stroke(width = 0.45.dp.toPx()),
+                    )
+                    drawCircle(
+                        color = Color.Black.copy(alpha = 0.30f),
+                        radius = ringRadius + (grooveOuter - grooveInner) / grooveCount * 0.5f,
+                        center = center,
+                        style = Stroke(width = 0.45.dp.toPx()),
+                    )
+                }
+
+                // Rim depth with restrained contrast.
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.62f),
+                    radius = platterRadius - 1.dp.toPx(),
+                    center = center,
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.22f),
+                    radius = platterRadius,
+                    center = center,
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.32f),
+                    radius = labelRadius + 1.dp.toPx(),
+                    center = center,
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+
+            // Large circular artwork label with a fine warm edge, matching the reference.
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize(labelFraction / platterFraction)
+                    .clip(CircleShape)
+                    .background(Color(0xFF111317)),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize(labelArtFraction / labelFraction)
+                        .clip(CircleShape)
+                        .background(FrostSoulSurfaceElevated),
+                ) {
+                    AsyncImage(
+                        model = artworkUrl,
+                        contentDescription = "Album artwork for $title",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                            .playerArtwork(expanded = true, round = true, rotation = { rotation.value }),
+                    )
+                    if (artworkUrl.isNullOrBlank()) {
+                        FSIcon(
+                            painter = painterResource(R.drawable.music_note),
+                            contentDescription = null,
+                            tint = FrostSoulOnSurfaceMuted,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(1.dp, palette.artworkPrimary.copy(alpha = 0.40f), CircleShape),
+                )
+            }
+
+        }
+
+        // Anisotropic gloss, deliberately OUTSIDE the rotating layer: on a real deck the
+        // reflection is cast by the room light, so it stays put while the record spins under
+        // it. Clipping it to the groove annulus keeps the label crisp. This replaces the old
+        // hard white arc that rotated with the disc and looked painted on.
+        Box(
+            modifier = Modifier.fillMaxSize(platterFraction).clip(CircleShape),
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val platterRadius = size.minDimension / 2f
+                val labelRadius = platterRadius *
+                    (PlayerLayoutTokens.TurntableLabelSize.value / PlayerLayoutTokens.TurntablePlatterSize.value)
+                val bandWidth = platterRadius - labelRadius
+                val bandRadius = labelRadius + bandWidth / 2f
+                // Fixed room reflection over the groove band: neutral and very soft.
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        0.00f to Color.Transparent,
+                        0.14f to Color.White.copy(alpha = 0.32f),
+                        0.28f to Color.Transparent,
+                        0.58f to Color.Transparent,
+                        0.74f to Color.White.copy(alpha = 0.25f),
+                        0.88f to Color.Transparent,
+                        1.00f to Color.Transparent,
+                        center = center,
+                    ),
+                    radius = bandRadius,
+                    center = center,
+                    style = Stroke(width = bandWidth),
+                )
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        0.00f to Color.Transparent,
+                        0.34f to Color.Black.copy(alpha = 0.09f),
+                        0.46f to Color.Transparent,
+                        0.84f to Color.Transparent,
+                        0.94f to Color.Black.copy(alpha = 0.08f),
+                        1.00f to Color.Transparent,
+                        center = center,
+                    ),
+                    radius = bandRadius,
+                    center = center,
+                    style = Stroke(width = bandWidth),
+                )
+            }
+        }
+
+        // ── Tonearm ──────────────────────────────────────────────────────────────────────
+        // Geometry is written as fractions of the deck card, so the whole assembly scales with
+        // whatever width the player page hands us. Two states, matching the reference deck:
+        //   playing → the stylus sits on the GROOVES (never over the label artwork);
+        //   stopped → the arm swings OUTWARD to the right and parks on its rest post.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val deck = size.minDimension
+            // Every component uses deck units, including widths, so compact decks cannot clip.
+            fun armPx(dp: Float) = deck * dp / cardSize
+            val pivot = Offset(size.width * 0.89f, size.height * 0.12f)
+            // Playing-state stylus target: in the outer third of the groove band, lower-right.
+            // The shorter reach keeps the arm proportional on narrow phones instead of stretched.
+            val playingNeedle = Offset(size.width * 0.79f, size.height * 0.76f)
+            val armVector = playingNeedle - pivot
+            val armSpan = hypot(armVector.x.toDouble(), armVector.y.toDouble()).toFloat()
+            if (armSpan <= 0f) return@Canvas
+            val armUnit = Offset(armVector.x / armSpan, armVector.y / armSpan)
+            // Screen-space perpendicular pointing outward, toward the deck's right edge.
+            val armNormal = Offset(armUnit.y, -armUnit.x)
+
+            // Reference 2: near-vertical shaft, a short J bend, and a tangent-aligned cartridge.
+            val headUnit = Offset(-0.48f, 0.8772685f)
+            val headDegrees = (atan2(headUnit.y.toDouble(), headUnit.x.toDouble()) * 180.0 / PI).toFloat()
+            val headshellSize = armPx(PlayerLayoutTokens.TurntableHeadshellSize.value)
+            val headLength = headshellSize * 1.85f
+            val joint = playingNeedle - headUnit * headLength
+            val control1 = pivot + Offset(0f, deck * 0.36f)
+            val control2 = joint - headUnit * (deck * 0.14f)
+
+            fun rotatedAround(point: Offset, about: Offset, degrees: Float): Offset {
+                val radians = degrees * PI.toFloat() / 180f
+                val dx = point.x - about.x
+                val dy = point.y - about.y
+                val c = cos(radians)
+                val s = sin(radians)
+                return Offset(about.x + dx * c - dy * s, about.y + dx * s + dy * c)
+            }
+
+            // Rest post: derived from the parked arm angle, so the headshell always lands on it.
+            val pegCenter = rotatedAround(playingNeedle, pivot, TonearmParkedDegrees)
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.45f),
+                radius = armPx(PlayerLayoutTokens.TurntableRestPegSize.value) * 0.78f,
+                center = pegCenter,
+            )
+            drawCircle(
+                brush = Brush.linearGradient(
+                    colors = listOf(Color(0xFF6C6C76), Color(0xFF232329)),
+                    start = Offset(pegCenter.x, pegCenter.y - armPx(PlayerLayoutTokens.TurntableRestPegSize.value)),
+                    end = Offset(pegCenter.x, pegCenter.y + armPx(PlayerLayoutTokens.TurntableRestPegSize.value)),
+                ),
+                radius = armPx(PlayerLayoutTokens.TurntableRestPegSize.value) / 2f,
+                center = pegCenter,
+            )
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.55f),
+                radius = armPx(PlayerLayoutTokens.TurntableRestPegSize.value) * 0.24f,
+                center = pegCenter,
+            )
+
+            // Static mount block the arm is bolted onto.
+            val baseRadius = armPx(32f) / 2f
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.50f),
+                radius = baseRadius * 1.06f,
+                center = Offset(pivot.x, pivot.y + armPx(2f)),
+            )
+            drawCircle(
+                brush = Brush.linearGradient(
+                    colors = listOf(Color(0xFF3A3A42), Color(0xFF121216)),
+                    start = Offset(pivot.x - baseRadius, pivot.y - baseRadius),
+                    end = Offset(pivot.x + baseRadius, pivot.y + baseRadius),
+                ),
+                radius = baseRadius,
+                center = pivot,
+            )
+            drawCircle(
+                color = Color.White.copy(alpha = 0.10f),
+                radius = baseRadius,
+                center = pivot,
+                style = Stroke(width = armPx(1f)),
+            )
+
+            withTransform({ rotate(tonearmAngle, pivot) }) {
+                val tubeBrush = Brush.linearGradient(
+                    colors = listOf(Color(0xFFB9BAC2), Color(0xFF6E6F78), Color(0xFF2A2A30)),
+                    start = pivot,
+                    end = joint,
+                )
+
+                // Counterweight barrel hanging off the back of the arm.
+                val weightCenter = pivot - Offset(0f, deck * 0.068f)
+                val weightLength = armPx(PlayerLayoutTokens.TurntableCounterweightSize.value) * 1.5f
+                val weightWidth = armPx(PlayerLayoutTokens.TurntableCounterweightSize.value)
+                drawLine(
+                    brush = tubeBrush,
+                    start = pivot,
+                    end = weightCenter,
+                    strokeWidth = armPx(3.2f),
+                    cap = StrokeCap.Round,
+                )
+                withTransform({ rotate(0f, weightCenter) }) {
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFFCFD0D8), Color(0xFF7A7B85), Color(0xFF31313A)),
+                            start = Offset(weightCenter.x - weightWidth / 2f, weightCenter.y),
+                            end = Offset(weightCenter.x + weightWidth / 2f, weightCenter.y),
+                        ),
+                        topLeft = Offset(
+                            weightCenter.x - weightWidth / 2f,
+                            weightCenter.y - weightLength / 2f,
+                        ),
+                        size = Size(weightWidth, weightLength),
+                        cornerRadius = CornerRadius(weightWidth * 0.32f),
+                    )
+                    // Machined rings on the weight.
+                    for (ridge in -1..1) {
+                        val ridgeY = weightCenter.y + ridge * weightLength * 0.24f
+                        drawLine(
+                            color = Color.Black.copy(alpha = 0.32f),
+                            start = Offset(weightCenter.x - weightWidth / 2f, ridgeY),
+                            end = Offset(weightCenter.x + weightWidth / 2f, ridgeY),
+                            strokeWidth = armPx(1f),
+                        )
+                    }
+                }
+
+                // Main tube: a gentle J, straight off the pivot then curving back to the
+                // headshell, drawn as shadow + body + specular highlight.
+                val tubePath = Path().apply {
+                    val c1 = control1
+                    val c2 = control2
+                    moveTo(pivot.x, pivot.y)
+                    cubicTo(c1.x, c1.y, c2.x, c2.y, joint.x, joint.y)
+                }
+                val tubeShadowPath = Path().apply {
+                    val o = armNormal * (armPx(1.6f))
+                    val c1 = control1 + o
+                    val c2 = control2 + o
+                    moveTo(pivot.x + o.x, pivot.y + o.y)
+                    cubicTo(c1.x, c1.y, c2.x, c2.y, joint.x + o.x, joint.y + o.y)
+                }
+                val tubeHighlightPath = Path().apply {
+                    val o = armNormal * (-armPx(1.3f))
+                    val c1 = control1 + o
+                    val c2 = control2 + o
+                    moveTo(pivot.x + o.x, pivot.y + o.y)
+                    cubicTo(c1.x, c1.y, c2.x, c2.y, joint.x + o.x, joint.y + o.y)
+                }
+                drawPath(
+                    path = tubeShadowPath,
+                    color = Color.Black.copy(alpha = 0.45f),
+                    style = Stroke(width = armPx(5.8f), cap = StrokeCap.Round),
+                )
+                drawPath(
+                    path = tubePath,
+                    brush = tubeBrush,
+                    style = Stroke(width = armPx(4.6f), cap = StrokeCap.Round),
+                )
+                drawPath(
+                    path = tubeHighlightPath,
+                    color = Color.White.copy(alpha = 0.30f),
+                    style = Stroke(width = armPx(0.9f), cap = StrokeCap.Round),
+                )
+
+                // Pivot bearing on top of the tube root.
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xFF4E4E58), Color(0xFF0E0E12)),
+                        center = pivot,
+                        radius = armPx(PlayerLayoutTokens.TurntableTonearmMountSize.value) / 2f,
+                    ),
+                    radius = armPx(PlayerLayoutTokens.TurntableTonearmMountSize.value) / 2f,
+                    center = pivot,
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.18f),
+                    radius = armPx(PlayerLayoutTokens.TurntableTonearmMountSize.value) / 2f,
+                    center = pivot,
+                    style = Stroke(width = armPx(1f)),
+                )
+                drawCircle(
+                    color = Color(0xFF17171C),
+                    radius = armPx(PlayerLayoutTokens.TurntableTonearmMountSize.value) * 0.22f,
+                    center = pivot,
+                )
+
+                // Headshell + cartridge block at the tip, aligned with the arm.
+                val headCenter = Offset(
+                    (joint.x + playingNeedle.x) / 2f,
+                    (joint.y + playingNeedle.y) / 2f,
+                )
+                withTransform({ rotate(headDegrees - 90f, headCenter) }) {
+                    val headWidth = headshellSize
+                    drawRoundRect(
+                        color = Color.Black.copy(alpha = 0.42f),
+                        topLeft = Offset(
+                            headCenter.x - headWidth / 2f + armPx(1.2f),
+                            headCenter.y - headLength / 2f + armPx(1.2f),
+                        ),
+                        size = Size(headWidth, headLength),
+                        cornerRadius = CornerRadius(headWidth * 0.42f),
+                    )
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF43434C), Color(0xFF141418)),
+                            start = Offset(headCenter.x - headWidth / 2f, headCenter.y),
+                            end = Offset(headCenter.x + headWidth / 2f, headCenter.y),
+                        ),
+                        topLeft = Offset(
+                            headCenter.x - headWidth / 2f,
+                            headCenter.y - headLength / 2f,
+                        ),
+                        size = Size(headWidth, headLength),
+                        cornerRadius = CornerRadius(headWidth * 0.42f),
+                    )
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.22f),
+                        start = Offset(headCenter.x - headWidth * 0.28f, headCenter.y - headLength * 0.36f),
+                        end = Offset(headCenter.x - headWidth * 0.28f, headCenter.y + headLength * 0.30f),
+                        strokeWidth = armPx(1f),
+                        cap = StrokeCap.Round,
+                    )
+                }
+
+                // Stylus: a short spike off the headshell, lit only while it tracks a groove.
+                val stylusTip = playingNeedle + headUnit * (deck * 0.009f)
+                drawLine(
+                    color = Color(0xFF0E0E12),
+                    start = playingNeedle,
+                    end = stylusTip,
+                    strokeWidth = armPx(2.2f),
+                    cap = StrokeCap.Round,
+                )
+                drawCircle(
+                    color = if (isPlaying) Color(0xFFD9F3F7) else Color(0xFF7C848A),
+                    radius = armPx(1.5f),
+                    center = stylusTip,
+                )
+                if (isPlaying) {
+                    drawCircle(
+                        color = Color(0xFFD9F3F7).copy(alpha = 0.20f),
+                        radius = armPx(3.5f),
+                        center = stylusTip,
+                    )
+                }
+            }
+        }
+
+        // Source badge in the deck corner.
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF08080A))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), CircleShape),
+        ) {
+            FSIcon(
+                painter = painterResource(R.drawable.music_note),
+                contentDescription = "Audio source",
+                tint = FrostSoulTheme.colors.accentBright,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FSSeekbar(
+    progress: Float,
+    durationMs: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    accent: Color = Color.White,
+    isEnabled: Boolean = durationMs > 0L,
+    onDraggingChanged: (Boolean) -> Unit = {},
+    showThumb: Boolean = true,
+    trackThickness: androidx.compose.ui.unit.Dp = 5.dp,
+    inactiveAlpha: Float = 0.16f,
+) {
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var dragProgress by remember { mutableFloatStateOf(progress) }
+    var isDragging by remember { mutableStateOf(false) }
+    val visibleProgress = (if (isDragging) dragProgress else progress).coerceIn(0f, 1f)
+    val targetDuration = durationMs.coerceAtLeast(1L)
+
+    fun seekAt(x: Float) {
+        if (!isEnabled || containerSize.width == 0) return
+        val fraction = (x / containerSize.width.toFloat()).coerceIn(0f, 1f)
+        dragProgress = fraction
+        onSeek((targetDuration * fraction).toLong())
+    }
+
+    Box(
+        modifier =
+            modifier
+                .height(30.dp)
+                .fillMaxWidth()
+                .onSizeChanged { containerSize = it }
+                .pointerInput(isEnabled, targetDuration) {
+                    detectTapGestures { offset -> seekAt(offset.x) }
+                }.pointerInput(isEnabled, targetDuration) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            onDraggingChanged(true)
+                            seekAt(offset.x)
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            onDraggingChanged(false)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            onDraggingChanged(false)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            seekAt(change.position.x)
+                        },
+                    )
+                }.semantics { contentDescription = "Playback progress" },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val trackHeight = trackThickness.toPx()
+            val y = this.size.height / 2f
+            val trackStart = Offset(0f, y)
+            val trackEnd = Offset(this.size.width, y)
+            val activeEnd = Offset(this.size.width * visibleProgress, y)
+            drawLine(
+                color = Color.White.copy(alpha = inactiveAlpha),
+                start = trackStart,
+                end = trackEnd,
+                strokeWidth = trackHeight,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = accent,
+                start = trackStart,
+                end = activeEnd,
+                strokeWidth = trackHeight,
+                cap = StrokeCap.Round,
+            )
+            // The Immersive player hides the thumb at rest and only shows it while scrubbing.
+            if (showThumb || isDragging) {
+                drawCircle(
+                    color = Color.White,
+                    radius = if (isDragging) 7.dp.toPx() else 5.dp.toPx(),
+                    center = activeEnd,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FSTopBar(
+    selectedPage: Int,
+    pageOffsetFraction: Float,
+    pageCount: Int,
+    onPageSelected: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        FSIconButton(
+            painter = painterResource(R.drawable.expand_more),
+            contentDescription = "Collapse player",
+            onClick = onDismiss,
+            buttonSize = 56.dp,
+            iconSize = 40.dp,
+            showContainer = false,
+            dimBackdrop = false,
+        )
+        Spacer(Modifier.width(12.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.weight(1f),
+        ) {
+            FrostSoulPagerDots(
+                pageCount = pageCount,
+                selectedPage = selectedPage,
+                selectedPageOffsetFraction = pageOffsetFraction,
+                onPageSelected = onPageSelected,
+            )
+        }
+    }
+}
