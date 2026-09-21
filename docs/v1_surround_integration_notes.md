@@ -1,9 +1,0 @@
-# V1 surround integration notes
-
-Source repository: `sakuraDev31/Audio-engine-plugin-for-frostsoulx-`, branch `main`, inspected at commit `81a4d1c` (`Keep surround processor spatial-only`).
-
-The plugin is a standalone C++17 `StereoSurroundProcessor` in `include/frostsoulx/StereoSurroundProcessor.h` and `src/StereoSurroundProcessor.cpp`. Its public API is `prepare(sampleRate, channels, maxBlockSize)`, `reset()`, `setEnabled(bool)`, `setIntensity(float)`, `isEnabled()`, `intensity()`, and `process(float* interleavedStereo, int frames)`. It is stereo-only, no-allocation during processing, and returns before touching PCM when disabled or intensity is zero. The plugin performs spatial processing only and does not limit, normalize, or clamp output; future headroom belongs outside it.
-
-The plugin CMake target is a static library named `frostsoulx_stereo_surround`. FrostSoulX will add an Android JNI shared library named `frostsoulx_surround_jni` and a Media3 `AudioProcessor` bridge named `StereoSurroundAudioProcessor`. The bridge must preserve a true disabled bypass and support Media3 PCM16 (`C.ENCODING_PCM_16BIT == 2`) and float (`C.ENCODING_PCM_FLOAT == 4`) stereo buffers.
-
-The current FrostSoulX parent branch is `genspark_ai_developer` at commit `ceeeaaccd`, after removal of the old native DSP/HRTF plugin. The current Media3 audio sink chain is in `MusicService.createRenderersFactory()` and contains `SilenceSkippingAudioProcessor` and `SonicAudioProcessor`; the new processor is intended to be appended there. The player two-dot menu opens `PlayerMenu` from `Player.kt`; `PlayerMenu` already navigates to full-screen settings routes using `navController.navigate(...)`. The new surround screen should be registered in `ui/screens/NavigationBuilder.kt` and opened from a prominent quick-access action in `PlayerMenu`.

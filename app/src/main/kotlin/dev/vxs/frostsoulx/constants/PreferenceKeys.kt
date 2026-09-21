@@ -929,17 +929,3 @@ enum class UpdateChannel {
             }
     }
 }
-
-val StereoSurroundEnabledKey = booleanPreferencesKey("stereoSurroundEnabled")
-val StereoSurroundIntensityKey = floatPreferencesKey("stereoSurroundIntensity")
-val StereoSurroundRoomPresetKey = intPreferencesKey("stereoSurroundRoomPreset")
-val StereoSurroundRoomMixKey = floatPreferencesKey("stereoSurroundRoomMix")
-val StereoSurroundReflectionAmountKey = floatPreferencesKey("stereoSurroundReflectionAmount")
-val StereoSurroundReverbTimeKey = floatPreferencesKey("stereoSurroundReverbTime")
-val StereoSurroundRoomSizeKey = floatPreferencesKey("stereoSurroundRoomSize")
-val StereoSurroundDampeningKey = floatPreferencesKey("stereoSurroundDampening")
-val StereoSurroundStereoWidthKey = floatPreferencesKey("stereoSurroundStereoWidth")
-val ImmersiveDevelopmentWarningShownKey = booleanPreferencesKey("immersiveDevelopmentWarningShown")
-val StereoSurroundQuantumFramesKey = intPreferencesKey("stereoSurroundQuantumFrames")
-val StereoSurroundLimiterEnabledKey = booleanPreferencesKey("stereoSurroundLimiterEnabled")
-val StereoSurroundSavedPresetsKey = stringPreferencesKey("stereoSurroundSavedPresets")

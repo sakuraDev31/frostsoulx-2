@@ -177,8 +177,6 @@ import dev.vxs.frostsoulx.constants.PauseListenHistoryKey
 import dev.vxs.frostsoulx.constants.PauseOnDeviceMuteKey
 import dev.vxs.frostsoulx.constants.PermanentShuffleKey
 import dev.vxs.frostsoulx.constants.PersistentQueueKey
-import dev.vxs.frostsoulx.constants.StereoSurroundEnabledKey
-import dev.vxs.frostsoulx.constants.StereoSurroundIntensityKey
 import dev.vxs.frostsoulx.constants.PlayerStreamClient
 import dev.vxs.frostsoulx.constants.PlayerStreamClientKey
 import dev.vxs.frostsoulx.constants.PlayerVolumeKey
@@ -1067,8 +1065,6 @@ class MusicService :
         super.onCreate()
         // Select the renderer chain from persisted state before ExoPlayer is built. When off,
         // no surround processor or JNI library participates in the playback path at all.
-        ImmersiveAudioRuntime.setIntensity(dataStore.get(StereoSurroundIntensityKey, 0.5f))
-        ImmersiveAudioRuntime.setEnabled(dataStore.get(StereoSurroundEnabledKey, false))
         equalizerPlaybackController.attach(this)
         ensureScopesActive()
 
@@ -1113,7 +1109,6 @@ class MusicService :
             snapshotRepository = playbackSnapshotRepository,
             queueTitleProvider = { queueTitle },
         )
-        ImmersiveAudioRuntime.setTransitionHandler(::requestImmersiveRebuild)
         playerInitialized.value = true
         database
             .blockedArtistIds()
@@ -7921,7 +7916,7 @@ class MusicService :
     private fun updateAudioOffload(enabled: Boolean) {
         // Offload bypasses AudioProcessorChain. It must be disabled while immersive audio is
         // active, otherwise locally decoded/offline tracks can skip the JNI engine entirely.
-        val effectiveEnabled = enabled && !crossfadeEnabled && !ImmersiveAudioRuntime.isEnabled()
+        val effectiveEnabled = enabled && !crossfadeEnabled
         runCatching {
             val builder = localPlayer.trackSelectionParameters.buildUpon()
             val audioOffloadPrefsClass = Class.forName("androidx.media3.common.AudioOffloadPreferences")
@@ -7978,7 +7973,6 @@ class MusicService :
             ).setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-    private val immersiveRebuildMutex = Mutex()
     private val _playerReplacementEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val playerReplacementEvents = _playerReplacementEvents.asSharedFlow()
 
@@ -8002,82 +7996,6 @@ class MusicService :
                 setOffloadEnabled(false)
             }
 
-    private fun requestImmersiveRebuild(enabled: Boolean) {
-        if (!::player.isInitialized || !::localPlayer.isInitialized) return
-        scope.launch(Dispatchers.Main.immediate) {
-            immersiveRebuildMutex.withLock {
-                rebuildImmersivePlayer(enabled)
-            }
-        }
-    }
-
-    private fun rebuildImmersivePlayer(enabled: Boolean) {
-        if (!::player.isInitialized || !::localPlayer.isInitialized) return
-        if (ImmersiveAudioRuntime.isEnabled() != enabled) return
-
-        val oldPlayer = player
-        val oldLocalPlayer = localPlayer
-        // Prefer local state because the AudioSink belongs to localPlayer. If a Cast session has
-        // transferred the queue, fall back to the active wrapper so the queue is not lost.
-        val statePlayer = oldLocalPlayer.takeIf { it.mediaItemCount > 0 } ?: oldPlayer
-        val mediaItems = List(statePlayer.mediaItemCount) { index -> statePlayer.getMediaItemAt(index) }
-        val currentIndex = statePlayer.currentMediaItemIndex
-        val positionMs = statePlayer.currentPosition.coerceAtLeast(0L)
-        val playWhenReady = statePlayer.playWhenReady
-        val repeatMode = statePlayer.repeatMode
-        val shuffleEnabled = statePlayer.shuffleModeEnabled
-        val playbackParameters = statePlayer.playbackParameters
-        val volume = oldLocalPlayer.volume
-
-        cancelCrossfade(resetVolume = true, resetPauseAtEnd = true)
-        releaseSecondaryCrossfadePlayer()
-        ImmersiveAudioRuntime.detachProcessor()
-
-        val replacementLocal = buildLocalPlayer()
-        replacementLocal.repeatMode = repeatMode
-        replacementLocal.shuffleModeEnabled = shuffleEnabled
-        replacementLocal.playbackParameters = playbackParameters
-        replacementLocal.volume = volume
-        if (mediaItems.isNotEmpty()) {
-            replacementLocal.setMediaItems(
-                mediaItems,
-                currentIndex.coerceIn(0, mediaItems.lastIndex),
-                positionMs,
-            )
-        }
-        replacementLocal.prepare()
-        oldPlayer.removeListener(this)
-        oldPlayer.removeListener(sleepTimer)
-        oldLocalPlayer.removeListener(audioEffectPlayerListener)
-
-        localPlayer = replacementLocal
-        player =
-            castPlaybackRepository
-                .createPlayer(
-                    context = this,
-                    localPlayer = replacementLocal,
-                    mediaItemResolver = CastMediaItemResolver(::resolveMediaItemForCast),
-                ).apply {
-                    addListener(this@MusicService)
-                    addListener(sleepTimer)
-                }
-        playbackCore?.replacePlayer(player)
-        mediaSession.setPlayer(player)
-        // Re-apply the preference after rebuilding the renderer chain. The immersive state is
-        // included by updateAudioOffload(), forcing local/offline PCM through the processor.
-        updateAudioOffload(dataStore.get(AudioOffload, false))
-        _playerReplacementEvents.tryEmit(Unit)
-        // Apply transport state after the replacement is visible to the core/session. This keeps
-        // play/pause and progress controllers attached to the live player after a toggle.
-        if (playWhenReady) {
-            player.play()
-        } else {
-            player.pause()
-        }
-        oldPlayer.release()
-        if (oldPlayer !== oldLocalPlayer) oldLocalPlayer.release()
-    }
-
     private fun createRenderersFactory() =
         object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -8094,21 +8012,9 @@ class MusicService :
                         150.toShort(),
                     )
                 val sonic = SonicAudioProcessor()
-                val b1Meter = ImmersiveStageMeter()
-                val b2Meter = ImmersiveStageMeter()
-                ImmersiveAudioRuntime.attachStageMeters(b1Meter, b2Meter)
-                val afterSilence = ImmersiveStageMeterAudioProcessor(b1Meter)
-                val afterSonic = ImmersiveStageMeterAudioProcessor(b2Meter)
-                // Keep the adapter in the chain even when the engine is OFF. Its OFF branch
-                // copies PCM byte-for-byte while collecting real input/output telemetry; the
-                // native DSP itself remains disabled until the runtime toggle enables it.
-                val surround = ImmersiveAudioProcessor().also(ImmersiveAudioRuntime::attach)
                 val chain = DefaultAudioSink.DefaultAudioProcessorChain(
                     silenceSkipping,
-                    afterSilence,
                     sonic,
-                    afterSonic,
-                    surround,
                 )
                 return DefaultAudioSink
                     .Builder(context)
@@ -8571,7 +8477,6 @@ class MusicService :
         playbackCore = null
         stopLyricsSync()
         equalizerPlaybackController.detach(this)
-        ImmersiveAudioRuntime.detach()
         discordServiceStopping = true
         requestDiscordSync(
             reason = "service_destroy",
