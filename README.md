@@ -61,10 +61,7 @@ The current visual direction uses a near-black canvas, artwork-led atmosphere, r
 
 ### Audio
 
-- Media3 audio processing with a low-latency immersive path.
-- Steam Audio integration is available as an experimental feature and may produce distorted or clipped sound on some devices.
-- The immersive audio OFF state preserves the original playback path and bypasses the experimental processor.
-- The experimental path uses a 384-frame processing quantum and exposes development diagnostics for tuning.
+- Media3 playback with the app's standard audio processing and device-compatible output path.
 
 ## Build from source
 
@@ -91,7 +88,6 @@ FrostSoulX acknowledges the open-source projects and contributors whose work pro
 - **[ArchiveTune](https://github.com/rukamori/ArchiveTune)** for the upstream Android music-player foundation and applicable source notices.
 - **[InnerTube](https://github.com/tombulled/innertube)** for YouTube and YouTube Music data-model and client integration reference.
 - **[Metrolist](https://github.com/mostafaalagamy/Metrolist)** for open-source Android music-player architecture and implementation inspiration.
-- **[Steam Audio](https://github.com/ValveSoftware/steam-audio)** for the experimental spatial-audio foundation.
 
 FrostSoulX is independently maintained. The names, licenses, notices, trademarks, and original contributions of credited projects remain their respective owners’ property.
 
