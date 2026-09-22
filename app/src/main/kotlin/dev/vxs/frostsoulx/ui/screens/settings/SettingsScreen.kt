@@ -110,7 +110,7 @@ fun SettingsScreen(
 
     Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Black,
+            containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             PremiumTopBar(
